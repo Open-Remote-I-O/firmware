@@ -1,0 +1,13 @@
+ / {
+        aliases {
+                led0 = &led_blue;
+        };
+
+        leds {
+                // compatible = "gpio-leds";
+//		compatible = "/77ws2812";
+                led_blue: led_0 {
+                        gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
+                };
+        };
+   };
