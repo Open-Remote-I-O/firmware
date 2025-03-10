@@ -3,7 +3,9 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/led_strip.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(main);
+
+//LOG_MODULE_REGISTER(main);
+LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 /* 1000 msec = 1 sec */
 #define SLEEP_TIME_MS   5000
@@ -31,11 +33,13 @@ static const struct device *const strip = DEVICE_DT_GET(STRIP_NODE);
 
 int main(void)
 {
-        int ret;
-        bool led_state = true;
+	int ret;
+	bool led_state = true;
 
-		size_t color = 2;
+	size_t color = 2;
 	int rc;
+
+	printk("Hello World! %s\n", CONFIG_ARCH);
 	
 	if (device_is_ready(strip)) {
 		LOG_INF("Found LED strip device %s", strip->name);
