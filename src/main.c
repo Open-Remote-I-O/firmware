@@ -6,6 +6,7 @@
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/dhcpv4_server.h>
 #include <esp_wifi.h>
+#include "secret.h"
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
@@ -26,10 +27,6 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 //Subscribe to the event you want to receive in the callback
 #define NET_EVENT_WIFI_MASK (NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT)
-
-//Wifi configurations
-#define WIFI_SSID 
-#define WIFI_PSK  
 
 static struct led_rgb colors[] = {
 	RGB(0x08, 0x00, 0x00), /* red */
