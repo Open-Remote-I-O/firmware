@@ -1,29 +1,38 @@
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+//LED
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/led_strip.h>
+//LOG
 #include <zephyr/logging/log.h>
+#include <zephyr/logging/log_ctrl.h>
+//WIFI
 #include <zephyr/net/wifi_mgmt.h>
 #include <esp_wifi.h>
 #include "secret.h"
+//NETWORK
 #include <zephyr/net/net_if.h>
-#include <zephyr/net/dhcpv4.h>
-
 #include <zephyr/net/net_core.h>
 #include <zephyr/net/net_mgmt.h>
-#include <zephyr/net/dns_resolve.h>
-
-#include <zephyr/net/socket.h>
 #include <zephyr/net/socket_service.h>
-#include <zephyr/net/sntp.h>
+#include <zephyr/net/socket.h>
 #include <arpa/inet.h>
+//dhcp
+#include <zephyr/net/dhcpv4.h>
+//dns
+#include <zephyr/net/dns_resolve.h>
+//sntp
+#include <zephyr/net/sntp.h>
 
-#include <zephyr/logging/log_ctrl.h>
-
+#include <time.h>
+#include <zephyr/posix/posix_types.h>
+#include <zephyr/posix/signal.h>
+#include <sys/timespec.h>
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
+//LED
 #define STRIP_NODE		DT_ALIAS(led_strip)
 #define RGB(_r, _g, _b) { .r = (_r), .g = (_g), .b = (_b) }
 
@@ -37,13 +46,17 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 #error Unable to determine length of LED strip
 #endif
 
+//NETWORK
+//wifi
 #define MACSTR "%02X:%02X:%02X:%02X:%02X:%02X"
 
 //Subscribe to the event you want to receive in the callback
 #define NET_EVENT_WIFI_MASK (NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT | NET_EVENT_IPV4_ADDR_ADD)
 
+//ntp
 #define NTP_SERVER "pool.ntp.org"
 
+//LED
 static struct led_rgb colors[] = {
 	RGB(0x08, 0x00, 0x00), /* red */
 	RGB(0x00, 0x08, 0x00), /* green */
@@ -52,8 +65,10 @@ static struct led_rgb colors[] = {
 
 static const struct device *const strip = DEVICE_DT_GET(STRIP_NODE);
 
+//NETWORK
 static struct net_if *sta_iface;
 
+//wifi
 static struct wifi_connect_req_params sta_config;
 
 static struct net_mgmt_event_callback wifi_cb;
@@ -61,9 +76,9 @@ static struct net_mgmt_event_callback ipv4_cb;
 
 static bool wifi_connected = false;
 
+//sntp
 struct sockaddr sntp_addr;
 socklen_t sntp_addrlen;
-
 bool sntp_addr_received = false;
 
 static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event, struct net_if *iface)
@@ -93,8 +108,7 @@ static void ipv4_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt
 		for (int i = 0; i < NET_IF_MAX_IPV4_ADDR; i++) {
 			char buf[NET_IPV4_ADDR_LEN];
 
-			if (iface->config.ip.ipv4->unicast[i].ipv4.addr_type !=
-								NET_ADDR_DHCP) {
+			if (iface->config.ip.ipv4->unicast[i].ipv4.addr_type != NET_ADDR_DHCP) {
 				continue;
 			}
 
@@ -190,6 +204,7 @@ void dns_result_cb(enum dns_resolve_status status, struct dns_addrinfo *info, vo
 		if (!strcmp(user_data, NTP_SERVER) && !sntp_addr_received) {
 			LOG_INF("Received ntp server");
 
+			//Update sntp param
 			sntp_addr = info->ai_addr;
 			sntp_addrlen = info->ai_addrlen;
 
@@ -206,10 +221,7 @@ void dns_result_cb(enum dns_resolve_status status, struct dns_addrinfo *info, vo
 		return;
 	}
 
-	LOG_INF("%s %s address: %s", user_data ? (char *)user_data : "<null>",
-		hr_family,
-		net_addr_ntop(info->ai_family, addr,
-					 hr_addr, sizeof(hr_addr)));
+	LOG_INF("%s %s address: %s", user_data ? (char *)user_data : "<null>", hr_family, net_addr_ntop(info->ai_family, addr, hr_addr, sizeof(hr_addr)));
 }
 
 static void do_ipv4_lookup(void)
@@ -223,8 +235,6 @@ static void do_ipv4_lookup(void)
 		LOG_ERR("Cannot resolve IPv4 address (%d)", ret);
 		return;
 	}
-
-	// LOG_DBG("DNS id %u", dns_id);
 }
 
 static void do_sntp(int family)
@@ -233,10 +243,6 @@ static void do_sntp(int family)
 	struct sntp_time s_time;
 	struct sntp_ctx ctx;
 	int rv;
-
-	// if (sntp_addr == (* void)) || sntp_addrlen == NULL) {
-	// 	return;
-	// }
 
 	rv = sntp_init(&ctx, &sntp_addr, sntp_addrlen);
 	if (rv < 0) {
@@ -253,16 +259,27 @@ static void do_sntp(int family)
 
 	LOG_INF("SNTP Time: %llu", s_time.seconds);
 
+	struct timespec ts = {
+		.tv_sec = s_time.seconds,
+		.tv_nsec = 0
+	};
+
+	int ret = clock_settime(1, &ts);
+	if (ret != 0) {
+		LOG_ERR( "Failed to set time (error %d)", ret);
+	}
+
 	sntp_close(&ctx);
 }
 
+// static uint64_t custom_timestamp(void) {
 
-static uint64_t custom_timestamp(void) {
-    return 50;  // Returns the current cycle count
-}
+// }
 
 int main(void)
 {
+	// log_set_timestamp_func(custom_timestamp, 1000000);
+
 	printk("_______       _____\n"); 
 	printk("__  __ \\_________(_)_____\n");
 	printk("_  / / /_  ___/_  /_  __ \\\n");
@@ -272,19 +289,17 @@ int main(void)
 
 	//Setup the led and set it blue
 	if (device_is_ready(strip)) {
-		LOG_INF("LED ready");
+		LOG_INF("LED is ready");
 	} else {
-		LOG_ERR("LED not ready");
+		LOG_ERR("LED is not ready");
 		return 0;
 	}
-
-	log_set_timestamp_func(custom_timestamp, 1000);
 
 	for(uint8_t i = 0; i < 2; i++){
 		led_strip_update_rgb(strip, &colors[USR_LED_BLUE], STRIP_NUM_PIXELS);
 	}
 
-	/* Register IPv4 callback */
+	/* Register wifi callback */
     net_mgmt_init_event_callback(&wifi_cb, wifi_event_handler, NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
     net_mgmt_add_event_callback(&wifi_cb);
 
@@ -301,9 +316,6 @@ int main(void)
 		k_sleep(K_MSEC(100));
 	}
 
-	// LOG_INF("Wait 10s");
-	// k_sleep(K_MSEC(1000));
-
 	do_ipv4_lookup();
 
 	while (!sntp_addr_received) {
@@ -311,18 +323,28 @@ int main(void)
 	}
 
 	do_sntp(AF_INET);
-	
+
 	struct net_if *iface = net_if_get_default();
 
     if (!iface) {
-        printk("No network interface found\n");
-    }
+        LOG_ERR("Network is not ready");
+    } else {
+		LOG_INF("Network is ready");
+	}
 
+	struct timespec ts_get;
 
 	while (1) {
 		k_sleep(K_MSEC(2000));
+		
 		if (wifi_connected) {
 			get_wifi_rssi();
+		}
+
+		if (clock_gettime(CLOCK_REALTIME, &ts_get) == 0) {
+			LOG_INF("System time: Sec_%lld nSec_%ld", ts_get.tv_sec, ts_get.tv_nsec);
+		} else {
+			LOG_ERR("Can't get system time");
 		}
 	}
 	
