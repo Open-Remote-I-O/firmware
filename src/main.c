@@ -4,9 +4,10 @@
 #include <zephyr/drivers/led_strip.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net/wifi_mgmt.h>
-#include <zephyr/net/dhcpv4_server.h>
 #include <esp_wifi.h>
 #include "secret.h"
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/dhcpv4.h>
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
@@ -26,7 +27,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 #define MACSTR "%02X:%02X:%02X:%02X:%02X:%02X"
 
 //Subscribe to the event you want to receive in the callback
-#define NET_EVENT_WIFI_MASK (NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT)
+#define NET_EVENT_WIFI_MASK (NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT | NET_EVENT_IPV4_ADDR_ADD)
 
 static struct led_rgb colors[] = {
 	RGB(0x08, 0x00, 0x00), /* red */
@@ -40,7 +41,8 @@ static struct net_if *sta_iface;
 
 static struct wifi_connect_req_params sta_config;
 
-static struct net_mgmt_event_callback cb;
+static struct net_mgmt_event_callback wifi_cb;
+static struct net_mgmt_event_callback ipv4_cb;
 
 static bool wifi_connected = false;
 
@@ -65,6 +67,25 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt
 	}
 }
 
+static void ipv4_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event, struct net_if *iface) {
+    if (mgmt_event == NET_EVENT_IPV4_ADDR_ADD) {
+        
+		for (int i = 0; i < NET_IF_MAX_IPV4_ADDR; i++) {
+			char buf[NET_IPV4_ADDR_LEN];
+
+			if (iface->config.ip.ipv4->unicast[i].ipv4.addr_type !=
+								NET_ADDR_DHCP) {
+				continue;
+			}
+
+			LOG_INF("   Address[%d]: %s", net_if_get_by_iface(iface), net_addr_ntop(AF_INET, &iface->config.ip.ipv4->unicast[i].ipv4.address.in_addr, buf, sizeof(buf)));
+			LOG_INF("    Subnet[%d]: %s", net_if_get_by_iface(iface), net_addr_ntop(AF_INET, &iface->config.ip.ipv4->unicast[i].netmask, buf, sizeof(buf)));
+			LOG_INF("    Router[%d]: %s", net_if_get_by_iface(iface), net_addr_ntop(AF_INET, &iface->config.ip.ipv4->gw, buf, sizeof(buf)));
+			LOG_INF("Lease time[%d]: %u seconds", net_if_get_by_iface(iface), iface->config.dhcpv4.lease_time);
+	
+		}
+    }
+}
 
 static int connect_to_wifi(void)
 {
@@ -134,14 +155,32 @@ int main(void)
 		led_strip_update_rgb(strip, &colors[USR_LED_BLUE], STRIP_NUM_PIXELS);
 	}
 
-	//Setup wifi callbacks
-	net_mgmt_init_event_callback(&cb, wifi_event_handler, NET_EVENT_WIFI_MASK);
-	net_mgmt_add_event_callback(&cb);
+	/* Register IPv4 callback */
+    net_mgmt_init_event_callback(&wifi_cb, wifi_event_handler, NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
+    net_mgmt_add_event_callback(&wifi_cb);
+
+    /* Register IPv4 callback */
+    net_mgmt_init_event_callback(&ipv4_cb, ipv4_event_handler, NET_EVENT_IPV4_ADDR_ADD);
+    net_mgmt_add_event_callback(&ipv4_cb);
 
 	//Get wifi interface and connect
 	sta_iface = net_if_get_wifi_sta();
 	connect_to_wifi();
-	
+
+	while(!wifi_connected){
+	k_sleep(K_MSEC(100));
+	}
+
+	LOG_INF("Wait 10s");
+	k_sleep(K_MSEC(10000));
+
+	struct net_if *iface = net_if_get_default();
+
+    if (!iface) {
+        printk("No network interface found\n");
+    }
+
+
 	while (1) {
 		k_sleep(K_MSEC(2000));
 		if (wifi_connected) {
