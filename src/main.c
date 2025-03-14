@@ -19,6 +19,9 @@
 #include <zephyr/net/sntp.h>
 #include <arpa/inet.h>
 
+#include <zephyr/logging/log_ctrl.h>
+
+
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 #define STRIP_NODE		DT_ALIAS(led_strip)
@@ -254,6 +257,10 @@ static void do_sntp(int family)
 }
 
 
+static uint64_t custom_timestamp(void) {
+    return 50;  // Returns the current cycle count
+}
+
 int main(void)
 {
 	printk("_______       _____\n"); 
@@ -270,6 +277,8 @@ int main(void)
 		LOG_ERR("LED not ready");
 		return 0;
 	}
+
+	log_set_timestamp_func(custom_timestamp, 1000);
 
 	for(uint8_t i = 0; i < 2; i++){
 		led_strip_update_rgb(strip, &colors[USR_LED_BLUE], STRIP_NUM_PIXELS);
@@ -312,9 +321,9 @@ int main(void)
 
 	while (1) {
 		k_sleep(K_MSEC(2000));
-		// if (wifi_connected) {
-		// 	get_wifi_rssi();
-		// }
+		if (wifi_connected) {
+			get_wifi_rssi();
+		}
 	}
 	
 	LOG_INF("Exit main");
