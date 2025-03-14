@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/led_strip.h>
@@ -12,6 +13,11 @@
 #include <zephyr/net/net_core.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/dns_resolve.h>
+
+#include <zephyr/net/socket.h>
+#include <zephyr/net/socket_service.h>
+#include <zephyr/net/sntp.h>
+#include <arpa/inet.h>
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
@@ -33,6 +39,8 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 //Subscribe to the event you want to receive in the callback
 #define NET_EVENT_WIFI_MASK (NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT | NET_EVENT_IPV4_ADDR_ADD)
 
+#define NTP_SERVER "pool.ntp.org"
+
 static struct led_rgb colors[] = {
 	RGB(0x08, 0x00, 0x00), /* red */
 	RGB(0x00, 0x08, 0x00), /* green */
@@ -49,6 +57,11 @@ static struct net_mgmt_event_callback wifi_cb;
 static struct net_mgmt_event_callback ipv4_cb;
 
 static bool wifi_connected = false;
+
+struct sockaddr sntp_addr;
+socklen_t sntp_addrlen;
+
+bool sntp_addr_received = false;
 
 static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event, struct net_if *iface)
 {
@@ -170,6 +183,18 @@ void dns_result_cb(enum dns_resolve_status status, struct dns_addrinfo *info, vo
 	if (info->ai_family == AF_INET) {
 		hr_family = "IPv4";
 		addr = &net_sin(&info->ai_addr)->sin_addr;
+
+		if (!strcmp(user_data, NTP_SERVER) && !sntp_addr_received) {
+			LOG_INF("Received ntp server");
+
+			sntp_addr = info->ai_addr;
+			sntp_addrlen = info->ai_addrlen;
+
+			net_sin(&sntp_addr)->sin_port = htons(123);
+
+			sntp_addr_received = true;
+		}
+
 	} else if (info->ai_family == AF_INET6) {
 		hr_family = "IPv6";
 		addr = &net_sin6(&info->ai_addr)->sin6_addr;
@@ -186,7 +211,7 @@ void dns_result_cb(enum dns_resolve_status status, struct dns_addrinfo *info, vo
 
 static void do_ipv4_lookup(void)
 {
-	static const char *query = "pool.ntp.org";
+	static const char *query = NTP_SERVER;
 	static uint16_t dns_id;
 	int ret;
 
@@ -196,7 +221,36 @@ static void do_ipv4_lookup(void)
 		return;
 	}
 
-	LOG_DBG("DNS id %u", dns_id);
+	// LOG_DBG("DNS id %u", dns_id);
+}
+
+static void do_sntp(int family)
+{
+	char *family_str = family == AF_INET ? "IPv4" : "IPv6";
+	struct sntp_time s_time;
+	struct sntp_ctx ctx;
+	int rv;
+
+	// if (sntp_addr == (* void)) || sntp_addrlen == NULL) {
+	// 	return;
+	// }
+
+	rv = sntp_init(&ctx, &sntp_addr, sntp_addrlen);
+	if (rv < 0) {
+		LOG_ERR("Failed to init SNTP %s ctx: %d", family_str, rv);
+		sntp_close(&ctx);
+	}
+
+	LOG_INF("Sending SNTP %s request...", family_str);
+	rv = sntp_query(&ctx, 4 * MSEC_PER_SEC, &s_time);
+	if (rv < 0) {
+		LOG_ERR("SNTP %s request failed: %d", family_str, rv);
+		sntp_close(&ctx);
+	}
+
+	LOG_INF("SNTP Time: %llu", s_time.seconds);
+
+	sntp_close(&ctx);
 }
 
 
@@ -238,10 +292,16 @@ int main(void)
 		k_sleep(K_MSEC(100));
 	}
 
-	LOG_INF("Wait 10s");
-	k_sleep(K_MSEC(10000));
+	// LOG_INF("Wait 10s");
+	// k_sleep(K_MSEC(1000));
 
 	do_ipv4_lookup();
+
+	while (!sntp_addr_received) {
+		k_sleep(K_MSEC(100));
+	}
+
+	do_sntp(AF_INET);
 	
 	struct net_if *iface = net_if_get_default();
 
